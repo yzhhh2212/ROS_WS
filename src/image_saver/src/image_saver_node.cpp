@@ -10,6 +10,7 @@
 #include <sstream>
 #include <string>
 #include <filesystem>
+#include <chrono>
 
 namespace fs = std::filesystem;
 
@@ -31,6 +32,7 @@ public:
         fs::create_directory(depth_path_);
         // Open the output file
         output_file_stream_.open(output_file_.c_str());
+        _image_counter = 0;
     }
 
     ~ImageSaver()
@@ -43,6 +45,7 @@ public:
 
     void callback(const ImageConstPtr &rgb_msg, const ImageConstPtr &depth_msg)
     {
+        auto start = std::chrono::high_resolution_clock::now();
         // Convert ROS image messages to OpenCV images
         cv_bridge::CvImageConstPtr cv_ptrRGB;
         cv_bridge::CvImageConstPtr cv_ptrD;
@@ -58,14 +61,17 @@ public:
         }
 
         // Compose file names using the timestamp
-        stringstream ssrgb;
-        stringstream ssdep;
-        ssrgb << fixed << setprecision(2) << rgb_msg->header.stamp.toSec();
-        ssdep << fixed << setprecision(2) << depth_msg->header.stamp.toSec();
-        string rgb_filename = rgb_path_ + "/" + ssrgb.str() + ".png";
-        string depth_filename = depth_path_ + "/" + ssdep.str() + ".png";
-        string txt_path_rgb = "rgb/" + ssrgb.str() + ".png";
-        string txt_path_depth = "depth/" + ssdep.str() + ".png";
+        // stringstream ssrgb;
+        // stringstream ssdep;
+        // ssrgb << fixed << setprecision(2) << rgb_msg->header.stamp.toSec();
+        // ssdep << fixed << setprecision(2) << depth_msg->header.stamp.toSec();
+
+        // 在回调函数或适当的位置生成文件名
+        string rgb_filename = rgb_path_ + "/image_" + std::to_string(_image_counter) + ".png";
+        string depth_filename = depth_path_ + "/depth_" + std::to_string(_image_counter) + ".png";
+        string txt_path_rgb = "rgb/image_" + std::to_string(_image_counter) + ".png";
+        string txt_path_depth = "depth/depth_" + std::to_string(_image_counter) + ".png";
+        _image_counter++;
 
         // 设置 PNG 压缩级别为 0 (无压缩)
         std::vector<int> compression_params;
@@ -85,6 +91,11 @@ public:
             output_file_stream_ << rgb_msg->header.stamp << " " << txt_path_rgb << " "
                                 << depth_msg->header.stamp << " " << txt_path_depth << endl;
         }
+        auto end = std::chrono::high_resolution_clock::now();
+
+        // 计算持续时间并以毫秒为单位输出结果
+        double time_taken = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        std::cout << "Time taken by program is : " << time_taken << " ms" << std::endl;
     }
 
 private:
@@ -92,6 +103,7 @@ private:
     string depth_path_;
     string output_file_;
     ofstream output_file_stream_;
+    int _image_counter;
 };
 
 int main(int argc, char **argv)
@@ -108,7 +120,7 @@ int main(int argc, char **argv)
     Subscriber<Image> rgb_sub(nh, "/camera/color/image_raw", 1);
     Subscriber<Image> depth_sub(nh, "/camera/aligned_depth_to_color/image_raw", 1);
     typedef sync_policies::ApproximateTime<Image, Image> MySyncPolicy;
-    Synchronizer<MySyncPolicy> sync(MySyncPolicy(10), rgb_sub, depth_sub);
+    Synchronizer<MySyncPolicy> sync(MySyncPolicy(50), rgb_sub, depth_sub);
     sync.registerCallback(boost::bind(&ImageSaver::callback, &image_saver, _1, _2));
 
     ros::spin();
