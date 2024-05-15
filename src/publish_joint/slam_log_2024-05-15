@@ -1,0 +1,25 @@
+[14:54:20.813] [info] Connecting to the MQTT server [tcp://10.30.1.135:1883]...
+[14:54:20.813] [info] Waiting for the connection...
+[14:54:20.929] [info]   ...OK
+[14:54:20.929] [info] Connection success
+[14:54:20.929] [info] Subscribing to topic [KR/GGXJ/operation]	using Qos [1]
+[14:54:20.929] [info] Subscribing to topic [KR/GGXJ/reportmsg]	using Qos [1]
+[14:54:20.932] [info] joint_manager_Subscription success
+[14:54:20.932] [info]  for token: [1]
+[14:54:20.932] [info] 	token topic: 'KR/GGXJ/operation', ...
+[14:54:20.939] [info] status: walk[7e-45] stretch[0] pitch[3.0784e-41]
+[14:54:23.971] [info] status: walk[4033] stretch[398] pitch[4.675563]
+[14:54:26.977] [info] status: walk[4033] stretch[398] pitch[4.675563]
+[14:54:29.982] [info] status: walk[4033] stretch[398] pitch[4.675563]
+[14:54:32.988] [info] status: walk[4033] stretch[398] pitch[4.675563]
+[14:54:36.010] [info] status: walk[4033] stretch[398] pitch[4.675563]
+[14:54:39.014] [info] status: walk[4033] stretch[398] pitch[4.675563]
+[14:54:42.050] [info] status: walk[4033] stretch[398] pitch[4.675563]
+[14:54:45.058] [info] status: walk[4033] stretch[398] pitch[4.675563]
+[14:54:48.063] [info] status: walk[4033] stretch[398] pitch[4.675563]
+[14:54:51.069] [info] status: walk[4033] stretch[398] pitch[4.666312]
+[14:54:54.078] [info] status: walk[4033] stretch[389] pitch[4.7108183]
+[14:54:57.143] [info] status: walk[4033] stretch[334] pitch[4.7108183]
+[14:55:00.149] [info] status: walk[4033] stretch[176] pitch[4.7108183]
+[14:55:03.260] [info] status: walk[4033] stretch[114] pitch[4.7108183]
+[14:55:06.332] [info] status: walk[4033] stretch[114] pitch[4.7108183]

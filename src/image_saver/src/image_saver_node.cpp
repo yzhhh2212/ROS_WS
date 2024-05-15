@@ -111,9 +111,9 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "image_saver_node");
     ros::NodeHandle nh;
 
-    string rgb_path = "/usr/local/project/keystar/rgbd_data/test3/rgb";
-    string depth_path = "/usr/local/project/keystar/rgbd_data/test3/depth";
-    string output_file = "/usr/local/project/keystar/rgbd_data/test3/timestamps_and_filenames.txt";
+    string rgb_path = "/usr/local/project/keystar/rgbd_data/textplane/rgb";
+    string depth_path = "/usr/local/project/keystar/rgbd_data/textplane/depth";
+    string output_file = "/usr/local/project/keystar/rgbd_data/textplane/timestamps_and_filenames.txt";
 
     ImageSaver image_saver(rgb_path, depth_path, output_file);
 
