@@ -326,13 +326,15 @@ void JointCallback::message_arrived(mqtt::const_message_ptr msg)
            type == JointManager::Degree) {
             // 偏航电机数据
             float value = std::stof(data[i]["value"].GetString()) / 100.;
-            mpManager->mStatus.mYaw = -(DEG2RAD(value) - mpManager->mZeros.mYaw);
+            mpManager->mStatus.mYaw = -(DEG2RAD(value-180.) );
 
         } else if(sn == (JointManager::PitchJoint+mpManager->DEVICE_ID_OFFSET) && 
            type == JointManager::Degree) {
             // 俯仰电机数据
             float value = std::stof(data[i]["value"].GetString()) / 100.;
-            mpManager->mStatus.mPitch = (DEG2RAD(value) - mpManager->mZeros.mPitch);
+            mpManager->mStatus.mPitch = (DEG2RAD(value - 270.) );
+            std::cout << "修改前 ： " << value << std::endl;
+            std::cout << "修改 ： " << mpManager->mStatus.mPitch << std::endl;
 
         }
     }
@@ -421,12 +423,12 @@ void JointManager::Execute(int which, float value, bool block)
         // 偏航控制
         actionCmd.AddMember("sn", JointManager::YawJoint + DEVICE_ID_OFFSET, allocator);
         actionCmd.AddMember("value_type", JointManager::Degree, allocator);
-        actionCmd.AddMember("value", rapidjson::Value(std::to_string(-(value + mZeros.mYaw)*100.).c_str(), allocator), allocator);
+        actionCmd.AddMember("value", rapidjson::Value(std::to_string(-(value + 180.)*100.).c_str(), allocator), allocator);
     } else if(which == PitchJoint) {
         // 俯仰控制
         actionCmd.AddMember("sn", JointManager::PitchJoint + DEVICE_ID_OFFSET, allocator);
         actionCmd.AddMember("value_type", JointManager::Degree, allocator);
-        actionCmd.AddMember("value", rapidjson::Value(std::to_string((value + mZeros.mPitch)*100.).c_str(), allocator), allocator);
+        actionCmd.AddMember("value", rapidjson::Value(std::to_string((value + 270.)*100.).c_str(), allocator), allocator);
     }
 
     rapidjson::StringBuffer buffer;
