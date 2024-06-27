@@ -14,6 +14,9 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   geometry_msgs
   std_msgs
+  nav_msgs
+  rospy 
+  message_generation
 )
 
 find_library(READLINE_LIBRARY readline)
@@ -66,6 +69,19 @@ find_package(Eigen3 REQUIRED)
 #   Message2.msg
 # )
 
+add_message_files(
+  FILES
+  Status.msg
+)
+
+generate_messages(
+  DEPENDENCIES
+  std_msgs  # 或者其他消息类型，如果你的消息依赖它们
+)
+
+catkin_package(
+  CATKIN_DEPENDS roscpp std_msgs message_runtime
+)
 ## Generate services in the 'srv' folder
 # add_service_files(
 #   FILES
@@ -173,6 +189,7 @@ add_executable( publish_joint
     ${TOOLS_SRC}
     ${PROJECT_SOURCE_DIR}/src/JointManager.cc
     ${PROJECT_SOURCE_DIR}/src/main.cc
+    ${PROJECT_SOURCE_DIR}/src/Action.cc
 )
 
 target_link_libraries( publish_joint

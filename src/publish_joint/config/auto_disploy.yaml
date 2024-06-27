@@ -1,0 +1,69 @@
+%YAML:1.0
+
+camera:
+  mode: "hikvisionSDK"
+  # rtsp: "rtsp://system:K0yS2015@10.30.1.31:554/channel=0,stream=0"
+  # rtsp: "rtsp://admin:K0yS2015@10.30.1.11:554/channel=0,stream=0"
+  rtsp: "./video_20240612.mp4"
+  hikvisionSDK:
+    valid:      1
+    ip:         "10.30.1.11"
+    user:       "admin"
+    password:   "K0yS2015"
+  intrinsics:
+    fx: 1761.09
+    fy: 1763.16
+    cx: 939.16
+    cy: 569.54
+  distCoef:
+    k1: -0.206497
+    k2: 0.170465
+    p1: 0.000137
+    p2: 0.000339
+    k3: 0.0
+  resolution:
+    # w: 1280
+    # h: 720
+    # w: 3840
+    # h: 2160
+    w: 1920
+    h: 1080
+
+joints:
+  mqttServer: 
+    # uri: "tcp://localhost:1883"
+    uri: "tcp://10.30.1.135:1883"
+    qos: 1
+  robotId: "KRXJ04-V3-001"
+  robotTopic:
+    - "KR/GGXJ/operation"
+    - "KR/GGXJ/reportmsg"
+  subTopic:
+    control: "KR/GGXJ/operation"
+  tcpServer:
+    ip: "10.30.1.10"
+    port: 10000
+  zeros:
+    walk:     0.0   # unit: mm
+    stretch:  0.0   # unit: mm
+    yaw:    180.0   # unit: deg
+    pitch:  270.0   # unit: deg
+  ObOa:   -97.5
+  OaOc:   69.2
+
+tracking:
+  # mode type: 0-OnlyTracking 1-SLAM
+  mode:         1
+  # sensor type: 0-visual 1-encoder 2-fusion
+  sensor:       0
+  detector:
+    valid:      1
+    modelDirectory:  "../config/model/"
+    modelPrefix: "obj"
+    gpu_id:     0
+    threshold:  0.5
+
+# 可视化选项
+viewer:
+  showImg: 1
+  showPcl: 1

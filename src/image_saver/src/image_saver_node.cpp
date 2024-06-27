@@ -111,16 +111,16 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "image_saver_node");
     ros::NodeHandle nh;
 
-    string rgb_path = "/usr/local/project/keystar/rgbd_data/textplane/rgb";
-    string depth_path = "/usr/local/project/keystar/rgbd_data/textplane/depth";
-    string output_file = "/usr/local/project/keystar/rgbd_data/textplane/timestamps_and_filenames.txt";
+    string rgb_path = "/usr/local/project/keystar/rgbd_data/TextPlaneWithEncoder/rgb";
+    string depth_path = "/usr/local/project/keystar/rgbd_data/TextPlaneWithEncoder/depth";
+    string output_file = "/usr/local/project/keystar/rgbd_data/TextPlaneWithEncoder/timestamps_and_filenames.txt";
 
     ImageSaver image_saver(rgb_path, depth_path, output_file);
 
-    Subscriber<Image> rgb_sub(nh, "/camera/color/image_raw", 1);
-    Subscriber<Image> depth_sub(nh, "/camera/aligned_depth_to_color/image_raw", 1);
+    Subscriber<Image> rgb_sub(nh, "/camera/color/image_raw", 5500);
+    Subscriber<Image> depth_sub(nh, "/camera/aligned_depth_to_color/image_raw", 5500);
     typedef sync_policies::ApproximateTime<Image, Image> MySyncPolicy;
-    Synchronizer<MySyncPolicy> sync(MySyncPolicy(50), rgb_sub, depth_sub);
+    Synchronizer<MySyncPolicy> sync(MySyncPolicy(5500), rgb_sub, depth_sub);
     sync.registerCallback(boost::bind(&ImageSaver::callback, &image_saver, _1, _2));
 
     ros::spin();

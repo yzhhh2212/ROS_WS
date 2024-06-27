@@ -2,10 +2,17 @@
 #define _JOINT_MANAGER_HPP_
 
 #include "kr_utils.hpp"
+#include "Action.hpp"
 
 #include "mqtt/client.h"
 #include "mqtt/async_client.h"
 
+
+
+#include "rapidjson/document.h"
+#include "rapidjson/writer.h" 
+#include "rapidjson/prettywriter.h"
+#include "rapidjson/stringbuffer.h"
 
 class JointCallback;
 
@@ -73,7 +80,7 @@ public:
 
     static Eigen::Matrix4f ToTwc(const Status& status)
     {
-        return ToTwc(status.mWalk, status.mStretch, status.mYaw, status.mPitch);
+        return ToTwc(status.mWalk, status.mStretch, - status.mYaw, status.mPitch);
     }
 
     static Eigen::Matrix4f ToTcw(const Status& status)
@@ -106,12 +113,12 @@ public:
     bool InitMQTT(void);
 
     /**
-     * @brief 关节控制接口
-     * @param which[in]: 对应JointType的枚举值
-     * @param value[in]: 关节运动的相对距离
-     * @param block[in]: true-阻塞等待直至消息发送成功 false-非阻塞
+     * @brief 关节控制请求接口
+     * @param action[in]: 动作结构体 描述待执行动作的关节/电机/参数等
+     * @param retry[in]: 如果未收到请求应答则重新执行
+     * @param timeout[in]: 阻塞等待应答的超时时间 unit ms
     */
-    void Execute(int which, float value, bool block = false);
+    bool RequestAction(Action::Ptr& action, int retry = 1, int timeout = 20);
 
     /**
      * @brief 获取所有关节状态数据
@@ -133,12 +140,21 @@ public:
 
     void HandleExecute(int argc, char** argv);
 
+    void HandleBrake(int argc, char** argv);
+
 private:
     // 对应协议中 功能/属性表 的枚举值
     enum ValueType {
         Direction   = 1,
         Position    = 2,
-        Degree      = 3
+        Degree      = 3,
+        Speed       = 4
+    };
+
+    enum Direction {
+        Stop = 0,
+        Positive = 1,
+        Negative = 2
     };
 
     /**
@@ -152,10 +168,31 @@ private:
      */
     void Publish(const string& topic, const string& payload, bool block, int qos);
 
+    /**
+     * 处理动作请求的应答
+     * @param doc   json格式的消息内容
+    */
+    void ProcessActResponse(const rapidjson::Document& doc);
+
+    /**
+     * 处理动作结束后的反馈
+     * @param doc   json格式的消息内容
+    */
+    void ProcessActFinish(const rapidjson::Document& doc);
+
+    /**
+     * 监听编码器状态发布服务器的线程
+    */
+    void OdomListen(void);
+
     // 底座中心 到 相机臂轴心 偏移 unit: mm
     static float lenObOa;
     // 相机臂轴心 到 相机光心 偏移 unit: mm
     static float lenOaOc;
+
+    // 编码器实时状态发布 socket
+    int mSock;
+    std::thread mOdomListenThread;
 
     // The MQTT client
     shared_ptr<mqtt::async_client> mpClient;
@@ -184,7 +221,14 @@ private:
 
     // 关节的零点
     Status mZeros;
+
+    // 执行中的动作集合
+    std::mutex mMutexAction;
+    std::set<Action::Ptr> msActions;
 };
+
+
+
 
 
 

@@ -3,6 +3,10 @@
 #include "rapidjson/document.h"
 #include "rapidjson/writer.h" 
 #include "rapidjson/prettywriter.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 #include "rapidjson/stringbuffer.h"
 
 #include "JointManager.hpp"
@@ -170,15 +174,15 @@ JointManager::JointManager(const cv::FileNode& configs)
 
     mPubTopic = "KR/GGXJ/" + mRobotId;
 
-    // 创建mqtt客户端
-    const cv::FileNode& mqttServer = configs["mqttServer"];
-    mpClient = std::make_shared<mqtt::async_client>(string(mqttServer["uri"]), "auto_disploy");
+    // // 创建mqtt客户端
+    // const cv::FileNode& mqttServer = configs["mqttServer"];
+    // mpClient = std::make_shared<mqtt::async_client>(string(mqttServer["uri"]), "auto_disploy");
 
-    mQos << mqttServer["qos"];
-    if (mQos < 0 || mQos > 2) {
-        spdlog::warn("Qos must be 0, 1, or 2, Invalid value,Set to 1");
-        mQos = 1;
-    }
+    // mQos << mqttServer["qos"];
+    // if (mQos < 0 || mQos > 2) {
+    //     spdlog::warn("Qos must be 0, 1, or 2, Invalid value,Set to 1");
+    //     mQos = 1;
+    // }
 
     configs["zeros"]["walk"] >> mZeros.mWalk;
     configs["zeros"]["stretch"] >> mZeros.mStretch;
@@ -188,6 +192,25 @@ JointManager::JointManager(const cv::FileNode& configs)
     configs["ObOa"] >> JointManager::lenObOa;
     configs["OaOc"] >> JointManager::lenOaOc;
 
+    
+    int tcpPort;
+    configs["tcpServer"]["port"] >> tcpPort;
+    std::string tcpIp = static_cast<string>(configs["tcpServer"]["ip"]);
+
+    mSock = socket(AF_INET, SOCK_STREAM, 0);
+    
+    struct sockaddr_in tcpAddr;
+    memset(&tcpAddr, 0, sizeof(tcpAddr));
+    tcpAddr.sin_family = AF_INET;
+    tcpAddr.sin_addr.s_addr = inet_addr(tcpIp.c_str());
+    tcpAddr.sin_port   = htons(tcpPort);
+
+    if(connect(mSock, (struct sockaddr *)&tcpAddr, sizeof(tcpAddr)) < 0) {
+        spdlog::warn("Tcp {}:{} connect fail", tcpIp, tcpPort);
+    } else {
+        mOdomListenThread = std::thread(std::bind(&JointManager::OdomListen, this));
+    }
+
     kr::RegisterCmd(kr::Command(
         vector<string>{"joints", "show", "status"},
         std::bind(&JointManager::HandleShowStatus, this, std::placeholders::_1, std::placeholders::_2)
@@ -196,6 +219,11 @@ JointManager::JointManager(const cv::FileNode& configs)
     kr::RegisterCmd(kr::Command(
         vector<string>{"joints", "execute"},
         std::bind(&JointManager::HandleExecute, this, std::placeholders::_1, std::placeholders::_2)
+    ));
+
+    kr::RegisterCmd(kr::Command(
+        vector<string>{"brake"},
+        std::bind(&JointManager::HandleBrake, this, std::placeholders::_1, std::placeholders::_2)
     ));
 }
 
@@ -214,9 +242,9 @@ JointManager::JointManager(const std::string& server, const std::string& clientI
     mvRobotTopic.push_back("KR/GGXJ/reportmsg");
 
     mControlSubTopic = "KR/GGXJ/operation";
-    mPubTopic = "KR/GGXJ/KRXJ04-V3-001";
+    mPubTopic = "KR/GGXJ/KRXJ04-003";
 
-    mRobotId = "KRXJ04-V3-001";
+    mRobotId = "KRXJ04-003";
 }
 
 bool JointManager::InitMQTT()
@@ -268,6 +296,34 @@ void JointManager::Publish(const string& topic, const string& payload, bool bloc
 
 }
 
+void JointManager::OdomListen(void)
+{
+    char buffer[128];
+    spdlog::info("Listening encoder status by TCP!");
+    while(1) {
+        memset(buffer, 0, sizeof(buffer));
+        size_t len = read(mSock, buffer, sizeof(buffer)-1);
+        int walk, stretch, yaw, pitch;
+        sscanf(buffer, "walk_pos=%d,tele_pos=%d,cam_pos=%d,axis_pos=%d", 
+            &walk, &stretch, &pitch, &yaw);
+        
+        // spdlog::debug("walk_pos={},tele_pos={},cam_pos={},axis_pos={}", walk, stretch, pitch, yaw);
+
+        std::unique_lock<std::mutex> lock(mMutex);
+
+        float value;
+        mStatus.mWalk = walk;
+        mStatus.mStretch = stretch;
+
+        value = float(yaw) / 100. ;
+        mStatus.mYaw = (DEG2RAD(value) - mZeros.mYaw);
+
+        value = float(pitch) / 100.;
+        mStatus.mPitch = (DEG2RAD(value) - mZeros.mPitch);
+    }
+
+}
+
 void JointCallback::message_arrived(mqtt::const_message_ptr msg) 
 {
     string topic = msg->get_topic();
@@ -285,12 +341,21 @@ void JointCallback::message_arrived(mqtt::const_message_ptr msg)
     rapidjson::StringBuffer buffer;
     rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
     doc.Accept(writer);
-    spdlog::info("Get message:\n{}", buffer.GetString());
+    spdlog::info("Get message: {}\n{}", topic, buffer.GetString());
     #endif
+
+    if(topic == "KR/GGXJ/reportmsg") {
+        mpManager->ProcessActFinish(doc);
+    } else if(topic == "KR/GGXJ/operation") {
+        mpManager->ProcessActResponse(doc);
+    }
 
     if(doc.HasMember("cmd")) {
         string cmd = doc["cmd"].GetString();
-        if(cmd != "report_state" && cmd != "get_state" && cmd != "report")
+        if(cmd != "report_state" &&
+           cmd != "get_state" && 
+           cmd != "report" &&
+           cmd != "current_position")
             return;
     } else 
         return;
@@ -303,6 +368,8 @@ void JointCallback::message_arrived(mqtt::const_message_ptr msg)
 
     if(!doc.HasMember("data") || !doc["data"].IsArray())
         return;
+    
+    return;
     
     std::unique_lock<std::mutex> lock(mpManager->mMutex);
 
@@ -326,17 +393,76 @@ void JointCallback::message_arrived(mqtt::const_message_ptr msg)
            type == JointManager::Degree) {
             // 偏航电机数据
             float value = std::stof(data[i]["value"].GetString()) / 100.;
-            mpManager->mStatus.mYaw = -(DEG2RAD(value-180.) );
+            mpManager->mStatus.mYaw = -(DEG2RAD(value) - mpManager->mZeros.mYaw);
 
         } else if(sn == (JointManager::PitchJoint+mpManager->DEVICE_ID_OFFSET) && 
            type == JointManager::Degree) {
             // 俯仰电机数据
             float value = std::stof(data[i]["value"].GetString()) / 100.;
-            mpManager->mStatus.mPitch = (DEG2RAD(value - 270.) );
-            std::cout << "修改前 ： " << value << std::endl;
-            std::cout << "修改 ： " << mpManager->mStatus.mPitch << std::endl;
+            mpManager->mStatus.mPitch = (DEG2RAD(value) - mpManager->mZeros.mPitch);
 
         }
+    }
+}
+
+void JointManager::ProcessActResponse(const rapidjson::Document& doc)
+{
+    if(!doc.HasMember("cmd") || !doc.HasMember("pid"))
+        return;
+    
+    if(strcmp("control", doc["cmd"].GetString()))
+        return;
+
+    // 打印消息
+    rapidjson::StringBuffer buffer;
+    rapidjson::PrettyWriter<rapidjson::StringBuffer> writer(buffer);
+    doc.Accept(writer);
+    spdlog::debug("Get message:\n{}", buffer.GetString());
+    
+    long unsigned int id = std::stoull(doc["pid"].GetString());
+
+    std::unique_lock<std::mutex> lock(mMutexAction);
+    for(auto& action: msActions) {
+        if(id == action->mId) {
+            action->SetState(Action::Executing);
+            spdlog::info("{} executing...", action->Info());
+
+            if(action->mMode == Action::Brake) {
+                // 停止操作不会再有结束反馈
+                msActions.erase(action);
+            }
+            return;
+        }
+    }
+}
+
+void JointManager::ProcessActFinish(const rapidjson::Document& doc)
+{
+    if(!doc.HasMember("cmd") || !doc.HasMember("data") || !doc["data"].IsArray())
+        return;
+    
+    if(strcmp("report_state", doc["cmd"].GetString()))
+        return;
+
+    const rapidjson::Value& data = doc["data"].GetArray();
+    std::unique_lock<std::mutex> lock(mMutexAction);
+    for(size_t i = 0, size = data.Size(); i < size; i++) {
+        if(!data[i].HasMember("sn")) 
+            continue;
+        
+        int type = atoi(data[i]["sn"].GetString()) - DEVICE_ID_OFFSET;
+
+        for(auto it = msActions.begin(); it != msActions.end(); ) {
+            if((*it)->mType  == type) {
+                (*it)->SetState(Action::Finish);
+                spdlog::info("{} finish.", (*it)->Info());
+
+                it = msActions.erase(it);
+                continue;
+            }
+            it++;
+        }
+
     }
 }
 
@@ -391,61 +517,105 @@ float JointManager::GetStatus(int which)
     }
 }
 
-void JointManager::Execute(int which, float value, bool block)
+bool JointManager::RequestAction(Action::Ptr& action, int retry, int timeout)
 {
-    if(which < 0 || which > PitchJoint)
-        return;
+    if(action->mType < Action::Walk || action->mType > Action::PitchRotate)
+        return false;
+    
+    if(action->mMode < Action::Brake || action->mMode > Action::Position)
+        return false;
     
     rapidjson::Document doc;
     auto& allocator = doc.GetAllocator();
     doc.SetObject();
     
+    // id用于机器人端应答请求对上本系统的动作ID
+    doc.AddMember("id", rapidjson::Value(std::to_string(action->mId).c_str(), allocator), allocator);
     doc.AddMember("topic", rapidjson::StringRef(mControlSubTopic.c_str()), allocator);
-    doc.AddMember("type", "req", allocator);
-    doc.AddMember("cmd", "control", allocator);
+    doc.AddMember("type", rapidjson::StringRef("req"), allocator);
+    doc.AddMember("cmd", rapidjson::StringRef("control"), allocator);
     doc.AddMember("data", rapidjson::Value(rapidjson::kArrayType).Move(), allocator);
 
     rapidjson::Value& data = doc["data"].GetArray();
-    data.PushBack(rapidjson::Value(rapidjson::kObjectType), allocator);
-    rapidjson::Value& actionCmd = data[0];
+    if(action->mMode == Action::Brake) {
 
-    if(which == WalkJoint) {
-        // 行走控制
-        actionCmd.AddMember("sn", JointManager::WalkJoint + DEVICE_ID_OFFSET, allocator);
-        actionCmd.AddMember("value_type", JointManager::Position, allocator);
-        actionCmd.AddMember("value", rapidjson::Value(std::to_string(value).c_str(), allocator), allocator);
-    } else if(which == StretchJoint) {
-        // 伸缩控制
-        actionCmd.AddMember("sn", JointManager::StretchJoint + DEVICE_ID_OFFSET, allocator);
-        actionCmd.AddMember("value_type", JointManager::Position, allocator);
-        actionCmd.AddMember("value", rapidjson::Value(std::to_string(value).c_str(), allocator), allocator);
-    } else if(which == YawJoint) {
-        // 偏航控制
-        actionCmd.AddMember("sn", JointManager::YawJoint + DEVICE_ID_OFFSET, allocator);
-        actionCmd.AddMember("value_type", JointManager::Degree, allocator);
-        actionCmd.AddMember("value", rapidjson::Value(std::to_string(-(value + 180.)*100.).c_str(), allocator), allocator);
-    } else if(which == PitchJoint) {
-        // 俯仰控制
-        actionCmd.AddMember("sn", JointManager::PitchJoint + DEVICE_ID_OFFSET, allocator);
-        actionCmd.AddMember("value_type", JointManager::Degree, allocator);
-        actionCmd.AddMember("value", rapidjson::Value(std::to_string((value + 270.)*100.).c_str(), allocator), allocator);
+        data.PushBack(rapidjson::Value(rapidjson::kObjectType), allocator);
+        // 501 可以停止所有正在执行的动作
+        data[0].AddMember("sn", 1 + DEVICE_ID_OFFSET, allocator);
+        data[0].AddMember("value_type", ValueType::Direction, allocator);
+        data[0].AddMember("value", rapidjson::Value(std::to_string(Direction::Stop).c_str(), allocator), allocator);
+
+    } else if(action->mMode == Action::Speed) {
+
+        data.PushBack(rapidjson::Value(rapidjson::kObjectType), allocator);
+        data.PushBack(rapidjson::Value(rapidjson::kObjectType), allocator);
+        data[0].AddMember("sn", action->mType + DEVICE_ID_OFFSET, allocator);
+        data[0].AddMember("value_type", ValueType::Direction, allocator);
+
+        data[1].AddMember("sn", action->mType + DEVICE_ID_OFFSET, allocator);
+        data[1].AddMember("value_type", ValueType::Speed, allocator);
+
+        if(action->mVelocity > 0) {
+
+            if(action->mType == Action::YawRotate)
+                data[0].AddMember("value", rapidjson::Value(std::to_string(Direction::Negative).c_str(), allocator), allocator);
+            else 
+                data[0].AddMember("value", rapidjson::Value(std::to_string(Direction::Positive).c_str(), allocator), allocator);
+
+            data[1].AddMember("value", rapidjson::Value(std::to_string(action->mVelocity).c_str(), allocator), allocator);
+        } else {
+
+            if(action->mType == Action::YawRotate)
+                data[0].AddMember("value", rapidjson::Value(std::to_string(Direction::Positive).c_str(), allocator), allocator);
+            else
+                data[0].AddMember("value", rapidjson::Value(std::to_string(Direction::Negative).c_str(), allocator), allocator);
+
+            data[1].AddMember("value", rapidjson::Value(std::to_string(-action->mVelocity).c_str(), allocator), allocator);
+        }
+        
+    } else if(action->mMode == Action::Position) {
+
+        data.PushBack(rapidjson::Value(rapidjson::kObjectType), allocator);
+        data[0].AddMember("sn", action->mType + DEVICE_ID_OFFSET, allocator);
+
+        if(action->mType == Action::Walk || action->mType == Action::Stretch)
+            data[0].AddMember("value_type", ValueType::Position, allocator);
+        else
+            data[0].AddMember("value_type", ValueType::Degree, allocator);
+
+        data[0].AddMember("value", rapidjson::Value(std::to_string(-action->mPosition).c_str(), allocator), allocator);
     }
 
     rapidjson::StringBuffer buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
     doc.Accept(writer);
 
-    Publish(mPubTopic, buffer.GetString(), block, mQos);
+    action->SetState(Action::State::WaitAck);
+
+    {
+        std::unique_lock<std::mutex> lock(mMutexAction);
+        msActions.insert(action);
+    }
+
+    for(size_t i = 0; i < retry; i++) {
+        Publish(mPubTopic, buffer.GetString(), false, 1);
+        if(action->WaitToState(Action::State::Executing, timeout))
+            return true;
+    }
+
+    return false;
 }
 
 
 void JointManager::HandleShowStatus(int argc, char** argv)
 {
-    Status status;
-    GetStatus(status, true);
+    Status status = mStatus;
 
     spdlog::info("walk [{:.2f}]mm stretch [{:.2f}]mm yaw[{:.2f}]degree pitch[{:.2f}]degree", 
         status.mWalk, status.mStretch, RAD2DEG(status.mYaw), RAD2DEG(status.mPitch));
+    
+    spdlog::info("raw walk [{:.0f}] stretch [{:.0f}] yaw [{:.0f}] pitch[{:.0f}]", mStatus.mWalk, mStatus.mStretch,
+        RAD2DEG(-status.mYaw-mZeros.mYaw), RAD2DEG(status.mPitch+mZeros.mPitch));
     
     std::cout << "Twb\n" << ToTwb(status.mWalk, status.mStretch) 
               << "\nTbc\n" << ToTbc(status.mYaw, status.mPitch) 
@@ -457,14 +627,27 @@ void JointManager::HandleShowStatus(int argc, char** argv)
 
 void JointManager::HandleExecute(int argc, char** argv)
 {
-    if(argc < 4) {
-        spdlog::warn("Usage: joints execute [1|2|3|4] [position]\n"
-        "\t1-walk; 2-stretch; 3-yaw; 4-pitch");
+    if(argc < 5) {
+        spdlog::warn("Usage: joints execute [joint] [mode] [position]\n"
+        "\t1-walk; 2-stretch; 3-yaw; 4-pitch\n"
+        "\t1-speed; 2-position");
         return;
     }
 
     int which = std::stoi(argv[2]);
-    float value = std::stof(argv[3]);
+    int mode = std::stoi(argv[3]);
+    float value = std::stof(argv[4]);
+
+    Action::Ptr action = std::make_shared<Action>(
+        Action::Type(which), Action::Mode(mode), value
+    );
     
-    Execute(which, value, true);
+    RequestAction(action, 1, 0);
+
+}
+
+void JointManager::HandleBrake(int argc, char** argv)
+{
+    Action::Ptr action = std::make_shared<Action>(Action::Walk, Action::Brake, 0.0);
+    RequestAction(action, 1, 3);
 }
